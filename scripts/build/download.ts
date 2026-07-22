@@ -216,10 +216,17 @@ export async function downloadWithRetry(url: string, dest: string, logPrefix: st
  * @param stripComponents How many top-level dirs to strip. 1 for github
  *   archives. 0 for tarballs that are already flat (e.g. prebuilt WebKit
  *   has `bun-webkit/` that the caller wants to keep for a rename step).
+ * @param excludes Archive path patterns to omit from extraction.
  */
-export async function extractTarGz(tarball: string, dest: string, stripComponents = 1): Promise<void> {
+export async function extractTarGz(
+  tarball: string,
+  dest: string,
+  stripComponents = 1,
+  excludes: string[] = [],
+): Promise<void> {
   const args = ["-xzmf", tarball, "-C", dest];
   if (stripComponents > 0) args.push(`--strip-components=${stripComponents}`);
+  for (const pattern of excludes) args.push(`--exclude=${pattern}`);
 
   const result = spawnSync(tarExe, args, {
     stdio: ["ignore", "ignore", "pipe"],
