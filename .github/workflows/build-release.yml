@@ -1,0 +1,137 @@
+name: Build Release Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git tag, branch, or commit to build (blank uses the selected workflow ref)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "bun-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}-${{ inputs.ref || 'current' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Release · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: latest
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LLVM_VERSION_MAJOR: "21"
+        run: |
+          set -euo pipefail
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-${LLVM_VERSION_MAJOR} main" | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential clang-${LLVM_VERSION_MAJOR} cmake golang-go \
+            lld-${LLVM_VERSION_MAJOR} llvm-${LLVM_VERSION_MAJOR} nasm \
+            ninja-build nodejs perl pkg-config ruby-full
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install cmake go llvm@21 nasm ninja perl ruby
+
+      - name: Install Scoop
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+          if (!(Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+          }
+          "$env:USERPROFILE\scoop\shims" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./setenv.bun --quiet
+          scoop install nodejs-lts go rustup nasm ruby perl ccache
+          scoop install llvm@21.1.8
+          source ./setenv.bun --quiet
+
+      - name: Check build environment
+        shell: bash
+        run: ./init-env.sh --check
+
+      - name: Build release executable
+        shell: bash
+        run: ./comp.sh --release
+
+      - name: Package executable
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux) os=linux ;;
+            macOS) os=darwin ;;
+            Windows) os=windows ;;
+            *) echo "error: unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          case "$RUNNER_ARCH" in
+            X64) arch=x64 ;;
+            ARM64) arch=aarch64 ;;
+            *) echo "error: unsupported runner architecture: $RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+
+          exe_suffix=""
+          [[ "$RUNNER_OS" == Windows ]] && exe_suffix=".exe"
+          binary="build/release/bun${exe_suffix}"
+          artifact="bun-${os}-${arch}"
+
+          mkdir -p dist/package
+          cp "$binary" "dist/package/${artifact}${exe_suffix}"
+          git rev-parse HEAD >dist/package/SOURCE_COMMIT
+          cmake -E chdir dist/package cmake -E tar cf "../${artifact}.zip" --format=zip -- \
+            "${artifact}${exe_suffix}" SOURCE_COMMIT
+          cmake -E sha256sum "dist/${artifact}.zip" >"dist/${artifact}.zip.sha256"
+
+          echo "name=$artifact" >>"$GITHUB_OUTPUT"
+          echo "archive=dist/${artifact}.zip" >>"$GITHUB_OUTPUT"
+          echo "checksum=dist/${artifact}.zip.sha256" >>"$GITHUB_OUTPUT"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
