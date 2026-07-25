@@ -28,6 +28,7 @@ Library/Caches
 *.big
 *.blob
 *.bun
+!setenv.bun
 *.crash
 *.database
 *.db

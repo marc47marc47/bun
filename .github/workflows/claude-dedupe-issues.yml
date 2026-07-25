@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 'Issue number to process for duplicate detection'
+        description: "Issue number to process for duplicate detection"
         required: true
         type: string
 
@@ -21,10 +21,26 @@ jobs:
       issues: write
 
     steps:
+      - name: Check Claude credentials
+        id: claude-auth
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [[ -n "$ANTHROPIC_API_KEY" || -n "$CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+            echo "available=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "available=false" >>"$GITHUB_OUTPUT"
+            echo "Claude automation skipped: configure ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN."
+          fi
+
       - name: Checkout repository
+        if: steps.claude-auth.outputs.available == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run Claude Code slash command
+        if: steps.claude-auth.outputs.available == 'true'
         uses: anthropics/claude-code-base-action@98d41f9809750c4c96f2cd285746ecef889f14bc
         env:
           ANTHROPIC_MODEL: claude-opus-4-6[1m]
@@ -32,3 +48,4 @@ jobs:
         with:
           prompt: "/dedupe ${{ github.repository }}/issues/${{ github.event.issue.number || inputs.issue_number }}"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

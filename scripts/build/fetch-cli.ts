@@ -181,7 +181,13 @@ async function fetchDep(
   await mkdir(dest, { recursive: true });
 
   // Github archives have a top-level directory <repo>-<commit>/. Strip it.
-  await extractTarGz(tarballPath, dest);
+  // These zstd CLI aliases are symlinks that Windows cannot create without
+  // Developer Mode; Bun only consumes lib/, so its build does not need them.
+  const excludes =
+    process.platform === "win32" && name === "zstd"
+      ? ["*/tests/cli-tests/bin/unzstd", "*/tests/cli-tests/bin/zstdcat"]
+      : [];
+  await extractTarGz(tarballPath, dest, 1, excludes);
 
   // ─── Apply patches / overlays ───
   for (let i = 0; i < patches.length; i++) {

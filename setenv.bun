@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# Source this file from Bash: source ./setenv.bun
+
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "error: setenv.bun must be sourced from Bash" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+_bun_env_quiet=0
+if [[ "${1:-}" == --quiet ]]; then
+  _bun_env_quiet=1
+fi
+
+export BUN_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+_bun_path_prepend() {
+  local directory="$1"
+  [[ -d "$directory" ]] || return 0
+  case ":$PATH:" in
+    *":$directory:"*) ;;
+    *) PATH="$directory:$PATH" ;;
+  esac
+}
+
+case "$(uname -s)" in
+  Linux)
+    _bun_path_prepend "$HOME/.cargo/bin"
+    _bun_path_prepend "$HOME/.bun/bin"
+    _bun_path_prepend "/usr/lib/llvm-21/bin"
+    _bun_path_prepend "/usr/lib/llvm-21.1/bin"
+    ;;
+  Darwin)
+    _bun_path_prepend "$HOME/.cargo/bin"
+    _bun_path_prepend "$HOME/.bun/bin"
+    _bun_path_prepend "/usr/local/opt/llvm@21/bin"
+    _bun_path_prepend "/opt/homebrew/opt/llvm@21/bin"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    _bun_scoop_root="${SCOOP:-$HOME/scoop}"
+    if command -v cygpath >/dev/null 2>&1 && [[ "$_bun_scoop_root" =~ ^[A-Za-z]:\\ ]]; then
+      _bun_scoop_root="$(cygpath -u "$_bun_scoop_root")"
+    fi
+
+    # Prepend in reverse priority; LLVM must win over machine-wide installs.
+    _bun_path_prepend "/c/Program Files/PowerShell/7"
+    _bun_path_prepend "$_bun_scoop_root/shims"
+    _bun_path_prepend "$_bun_scoop_root/apps/nodejs-lts/current"
+    _bun_path_prepend "$_bun_scoop_root/apps/nodejs-lts/current/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/rustup/current/.cargo/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/perl/current/perl/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/perl/current/perl/site/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/ruby/current/gems/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/ruby/current/bin"
+    _bun_path_prepend "$_bun_scoop_root/apps/llvm/current/bin"
+
+    if [[ -d "$_bun_scoop_root/apps/ruby/current/gems" ]]; then
+      if command -v cygpath >/dev/null 2>&1; then
+        GEM_HOME="$(cygpath -w "$_bun_scoop_root/apps/ruby/current/gems")"
+      else
+        GEM_HOME="$_bun_scoop_root/apps/ruby/current/gems"
+      fi
+      export GEM_HOME
+    fi
+    ;;
+esac
+
+export PATH
+
+if ((!_bun_env_quiet)); then
+  echo "Bun build environment loaded from $BUN_REPO_ROOT"
+  if command -v clang-cl >/dev/null 2>&1; then
+    clang-cl --version | head -n 1
+  elif command -v clang >/dev/null 2>&1; then
+    clang --version | head -n 1
+  fi
+  command -v ruby >/dev/null 2>&1 && ruby --version
+fi
+
+unset _bun_env_quiet _bun_scoop_root
+unset -f _bun_path_prepend
